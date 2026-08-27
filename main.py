@@ -1,6 +1,8 @@
 import os
 import time
 import threading
+import json
+import requests
 from urllib.parse import quote
 
 from kivy.app import App
@@ -11,7 +13,8 @@ from kivy.clock import mainthread
 
 from google import genai
 from google.genai import types
-from elevenlabs.client import ElevenLabs
+import edge_tts
+import asyncio
 import speech_recognition as sr
 
 from jnius import autoclass
@@ -21,11 +24,10 @@ Uri = autoclass('android.net.Uri')
 PythonActivity = autoclass('org.kivy.android.PythonActivity')
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "BURAYA_GEMINI_API_KEY_YAZIN")
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "BURAYA_ELEVENLABS_API_KEY_YAZIN")
-VOICE_ID = "BURAYA_ELEVENLABS_VOICE_ID_YAZIN"
+GROK_API_KEY = os.environ.get("GROK_API_KEY", "BURAYA_GROK_API_KEY_YAZIN")
+VOICE_ID = "tr-TR-EmelNeural"  # Kadın səs. Kişi səs istəsən: "tr-TR-AhmetNeural"
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-eleven_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
 
 def _start_view_intent(url: str):
@@ -130,6 +132,27 @@ class NovaxUI(BoxLayout):
     pass
 
 
+def call_grok(user_command: str):
+    """Gemini başarısız olduğunda ehtiyat model olaraq Grok'u çağırır."""
+    url = "https://api.x.ai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": "grok-4-fast",
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_command},
+        ],
+        "temperature": 0.7,
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
+
+
 class NovaxApp(App):
     def build(self):
         self.orientation = "vertical"
@@ -153,11 +176,13 @@ class NovaxApp(App):
     def speak(self, text):
         self.set_status(text)
         try:
-            audio = eleven_client.generate(text=text, voice=VOICE_ID, model="eleven_multilingual_v2")
             out_path = "/sdcard/novax_voice.mp3"
-            with open(out_path, "wb") as f:
-                for chunk in audio:
-                    f.write(chunk)
+
+            async def _generate():
+                communicate = edge_tts.Communicate(text, VOICE_ID)
+                await communicate.save(out_path)
+
+            asyncio.run(_generate())
             _start_view_intent("file://" + out_path)
         except Exception as e:
             print(f"[Səs Xətası]: {e}")
@@ -214,7 +239,12 @@ class NovaxApp(App):
             else:
                 self.speak(response.text)
         except Exception as e:
-            self.speak(f"Xəta baş verdi cənab: {e}")
+            print(f"[Gemini Xətası]: {e}")
+            try:
+                fallback_text = call_grok(user_command)
+                self.speak(fallback_text)
+            except Exception as e2:
+                self.speak(f"Xəta baş verdi cənab: {e2}")
 
 
 if __name__ == "__main__":
