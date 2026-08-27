@@ -8,7 +8,7 @@ source.include_exts = py,png,jpg,kv,atlas,mp3
 
 version = 1.0
 
-requirements = python3,kivy,pyjnius,requests,google-genai,elevenlabs,speechrecognition
+requirements = python3,kivy,pyjnius,requests,google-genai,speechrecognition,edge-tts
 
 orientation = portrait
 fullscreen = 0
